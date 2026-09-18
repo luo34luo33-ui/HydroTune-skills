@@ -285,18 +285,12 @@ class HydroTuneE2E(unittest.TestCase):
             self.assertEqual(simulation.event_id.nunique(), 2)
             self.assertEqual(set(simulation.model), {"xaj"})
 
-    def test_intake_extracts_confirmed_flow_threshold_events(self):
+    def test_intake_rejects_removed_flow_threshold_event_flags(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw = root / "raw.csv"
             data = root / "dataset"
-            pd.DataFrame(
-                {
-                    "Time": pd.date_range("2020-01-01", periods=10, freq="h"),
-                    "Rain": [0, 4, 0, 0, 5, 0, 0, 3, 0, 0],
-                    "Flow": [0, 5, 4, 1, 0, 0, 6, 7, 1, 0],
-                }
-            ).to_csv(raw, index=False)
+            self.write_raw(raw)
             result = self.run_cli(
                 "intake",
                 raw,
@@ -317,12 +311,75 @@ class HydroTuneE2E(unittest.TestCase):
                 "--event-merge-gap-steps",
                 "1",
             )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("unrecognized arguments", result.stderr)
+
+    def test_intake_extracts_configured_hydrologic_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw = root / "raw.csv"
+            config_path = root / "event-config.json"
+            data = root / "dataset"
+            flow = np.ones(120, dtype=float)
+            shape = np.array([2, 4, 8, 14, 8, 4, 2], dtype=float)
+            flow[27:34] = shape
+            flow[82:89] = shape * 0.8
+            pd.DataFrame(
+                {
+                    "Time": pd.date_range("2020-01-01", periods=len(flow), freq="h"),
+                    "Rain": np.zeros(len(flow)),
+                    "Flow": flow,
+                }
+            ).to_csv(raw, index=False)
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "bfi_max": 0.5,
+                        "alpha": 0.9,
+                        "peak_quantile": 0.5,
+                        "prominence_factor": 0.05,
+                        "min_peak_distance_hours": 12.0,
+                        "boundary_fraction": 0.1,
+                        "boundary_persistence_steps": 2,
+                        "max_search_days": 0.5,
+                        "merge_gap_hours": 2.0,
+                        "valley_ratio_threshold": 0.8,
+                        "min_event_duration_hours": 1.0,
+                        "min_peak_flow": None,
+                        "min_event_volume": None,
+                        "warmup_steps": 2,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = self.run_cli(
+                "intake",
+                raw,
+                data,
+                "--time-column",
+                "Time",
+                "--role",
+                "precipitation=Rain",
+                "--role",
+                "discharge=Flow",
+                "--unit",
+                "precipitation=mm",
+                "--unit",
+                "discharge=m3/s",
+                "--extract-events",
+                "--event-config",
+                config_path,
+            )
             self.assertEqual(result.returncode, 0, result.stderr)
             meta = json.loads((data / "dataset.json").read_text(encoding="utf-8"))
             frame = pd.read_parquet(data / "dataset.parquet")
             self.assertEqual(meta["series_mode"], "event_collection")
+            self.assertEqual(meta["splits"]["warmup_status"], "confirmed_from_event_config")
+            self.assertEqual(meta["provenance"]["event_extraction"]["method"], "eckhardt_peak_boundary_v1")
+            self.assertEqual(len(meta["events"]), 2)
             self.assertEqual(frame.event_id.nunique(), 2)
-            self.assertEqual(meta["provenance"]["event_extraction"]["flow_threshold"], 3.0)
+            self.assertTrue({"baseflow", "quickflow", "is_warmup"}.issubset(frame))
 
     def test_compare_still_runs_three_models_and_bma(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,11 +1,11 @@
 ---
 name: hydrotune-intake
-description: 指导 Agent 检查、确认并整理流域降水、流量、气象时序和可选空间输入，再写出标准 HydroTune dataset artifacts；不要用于模型率定。
+description: 指导 Agent 检查、确认并整理流域降水、流量、气象时序和可选空间输入，按需提取洪水场次，再写出标准 HydroTune dataset artifacts；不要用于模型率定。
 ---
 
 # HydroTune Intake
 
-用本 Skill 时，Agent 负责读取原始 CSV/XLSX/Parquet、理解列含义、发现缺口、向用户确认科学元数据，并在必要时自行编写临时检查代码。HydroTune Intake runtime 用于把已确认的输入写成后续建模、率定、诊断可复用的 `dataset.json`、`dataset.parquet` 和 `result.json`。
+用本 Skill 时，Agent 负责读取原始 CSV/XLSX/Parquet、理解列含义、发现缺口并向用户确认科学元数据。HydroTune Intake runtime 用于把已确认的输入写成后续建模、率定、诊断可复用的 `dataset.json`、`dataset.parquet` 和 `result.json`；当用户明确要求并提供完整事件配置时，runtime 还可执行确定性的 Eckhardt 基流分割、quickflow 洪峰识别和场次边界提取。
 
 ## 何时使用
 
@@ -13,7 +13,7 @@ description: 指导 Agent 检查、确认并整理流域降水、流量、气象
 
 - 用户提供降雨、流量、气象时序数据，并希望进入 HydroTune workflow。
 - 需要把已确认的时间列、变量角色、单位、流域面积、数据形态写成 HydroTune dataset artifacts。
-- 用户明确希望从连续流量序列中按已确认阈值提取洪水场次。
+- 用户希望从连续流量序列中执行基流分割、洪峰识别、复峰合并、洪量筛选和场次成果整理。
 - 用户提供 DEM、流域边界、出口点或站点空间位置，需要判断是否应进入分布式/半分布式建模准备。
 
 不使用本 Skill 做 HBV/XAJ/Tank 运行、参数率定、模型比较、NSE/KGE/RMSE/MAE/PBIAS 计算或模型误差诊断。
@@ -49,12 +49,13 @@ python scripts/hydrotune.py intake <input-or-directory> <dataset-output-dir> \
 
 ## Runtime 边界
 
-Intake runtime 的职责限于 dataset artifact 写入和必要硬校验。以下事项由 Agent 在调用 runtime 前完成：
+Intake runtime 的职责限于 dataset artifact 写入、必要硬校验和已配置的确定性洪水场次提取。以下事项由 Agent 在调用 runtime 前完成：
 
 - 检查原始数据结构、时间列候选、变量候选和缺失情况。
 - 确认变量角色、单位、数据形态和必要流域元数据。
 - 判断空白降雨是 0 降雨还是缺测。
 - 确认自然流量、上游入流或调度出库语义。
+- 确认事件定义、基流分割、峰值、边界、合并、规模门槛和前期窗口参数，并写入事件配置 JSON。
 - 处理或整理 DEM、流域边界、出口点、站点、HRU 等空间输入。
 
 Runtime 提供以下可复用能力：
@@ -64,7 +65,7 @@ Runtime 提供以下可复用能力：
 - 写出 `dataset.json`、`dataset.parquet`、`result.json`。
 - 为 `continuous` 写 chronological split。
 - 为 `event_collection` 写事件 split，并标记 `warmup_steps` 仍需后续确认。
-- 在用户确认阈值后，从连续流量序列提取事件集合。
+- 在显式 `--extract-events --event-config` 下执行 Eckhardt 基流分割、quickflow 洪峰识别、总流量初始边界、复峰合并和 quickflow 边界收紧，并写出 `event_collection`。
 - 为后续 modeling/calibration/diagnosis 提供稳定 `load_dataset` 和 split 选择契约。
 
 ## 科学确认规则
@@ -82,7 +83,7 @@ Runtime 提供以下可复用能力：
 - `Q`、`flow`、`outflow`、`release`、`inflow` 等流量列到底是天然出口流量、上游来水还是工程调度量。
 - 空白降雨是 0 降雨还是缺测；若不明确，报告中保留不确定性。
 - `event_collection` 的 warmup 样本数；未确认前不得进入评分、率定或诊断。
-- 连续序列事件提取的流量阈值和短间断合并步数。
+- 连续序列事件提取的事件定义、基流分割与峰值参数、规模门槛和前期窗口。
 
 ## 数据形态
 
@@ -90,9 +91,11 @@ Runtime 提供以下可复用能力：
 
 `event_collection` 表示独立洪水场次集合。每个文件会成为一个 `event_id`；后续步骤不得跨事件填补、推断连续状态或传递模型状态。
 
-## 连续序列事件提取
+## 连续序列洪水场次提取
 
-只有当用户明确要求，并确认阈值和短间断合并步数后，才可调用：
+仅在用户明确要求从连续流量、入库流量或其他已确认目标流量中提取洪水场次时进入本流程。若用户只要求年最大流量、超阈值次数或固定日期窗口，不要自动升级为完整场次提取。
+
+洪水场次提取由 Intake runtime 的固定 `eckhardt_peak_boundary_v1` 方法执行。它不包含旧的简单流量阈值切分模式；所有影响结果的参数必须由用户确认后写入 JSON，不得依赖源脚本示例值或 Agent 静默默认。
 
 ```text
 python scripts/hydrotune.py intake <continuous-input> <dataset-output-dir> \
@@ -100,18 +103,208 @@ python scripts/hydrotune.py intake <continuous-input> <dataset-output-dir> \
   --role precipitation=<confirmed-rain-column> \
   --role discharge=<confirmed-flow-column> \
   --unit precipitation=mm \
-  --unit discharge=mm \
+  --unit discharge=m3/s \
   --extract-events \
-  --event-flow-threshold <confirmed-flow-threshold> \
-  --event-merge-gap-steps <confirmed-gap-steps>
+  --event-config <confirmed-event-config.json>
 ```
 
-规则：
+事件配置必须显式包含全部字段；`alpha: null` 表示按退水段估计，`min_peak_flow` 或 `min_event_volume` 为 `null` 表示关闭对应门槛：
 
-- 不得自动选择 `--event-flow-threshold`。
-- 不得自动选择 `--event-merge-gap-steps`；它的单位是样本步数。
-- `--extract-events` 不得与 `--series-mode event_collection` 同时使用。
-- 若没有检测到超过阈值的事件，runtime 返回 `error`，不得继续 workflow。
+```json
+{
+  "bfi_max": 0.80,
+  "alpha": null,
+  "peak_quantile": 0.90,
+  "prominence_factor": 0.25,
+  "min_peak_distance_hours": 24.0,
+  "boundary_fraction": 0.05,
+  "boundary_persistence_steps": 3,
+  "max_search_days": 20.0,
+  "merge_gap_hours": 24.0,
+  "valley_ratio_threshold": 0.60,
+  "min_event_duration_hours": 1.0,
+  "min_peak_flow": null,
+  "min_event_volume": null,
+  "warmup_steps": 72
+}
+```
+
+上例只展示文件结构，其中数值必须按当前流域确认。`--extract-events` 不得与 `--series-mode event_collection` 同时使用；`--event-config` 不得脱离 `--extract-events` 单独使用。
+
+### 开始前确认
+
+先读取文件结构、表头、少量样例和时间范围，给出可验证的候选映射，再集中确认会实质改变结果的设置：
+
+| 类别 | 必须确认的内容 |
+|---|---|
+| 数据定位 | 输入文件、工作表或表名，以及目标时间列 |
+| 时间语义 | 格式、时区、时间戳代表瞬时值还是区间值 |
+| 流量语义 | 用于提取的列是天然流量、入流、出流、调度流量还是水位 |
+| 单位与频率 | 流量单位；分钟、小时、日或不规则时间步 |
+| 事件定义 | 水文洪水、调度入库过程还是降雨径流事件 |
+| 规模门槛 | 最小洪峰、总洪量或直接径流洪量、最短历时及其业务依据 |
+| 前期窗口 | 起涨前保留的实际时长、用途以及是否允许相邻事件窗口重叠 |
+| 数据修复 | 重复时间规则、允许插值的最大连续缺失长度和长缺口处理方式 |
+| 输出 | 汇总表、逐场文件、需要保留的原始驱动列、图和文件格式 |
+
+出现相应情况时再确认雨量站列及面雨量、入流与出流的导出范围、水位流量转换、水库调度影响、人工场次清单、重采样规则、测站迁移或评级曲线变化。每次追问仍遵守“最多三个科学问题”的总规则。
+
+### 输入整理与时间规则
+
+1. 将时间列显式转换为时间类型；报告无法解析的记录，不得静默丢弃。
+2. 按时间升序排序；重复时间戳必须按用户确认的删除、保留、聚合或分组规则处理。
+3. 将目标流量显式转换为数值，检查负值、无穷值、异常尖峰、长期恒值、传感器归零和单位变化。异常尖峰先报告位置、幅度和影响，不自动删除。
+4. 统计缺失点、连续缺失段及其实际时长。事件 runtime 不执行插值；必须由 Agent 按用户确认规则在独立成果中处理短缺失并保留标记。仍有缺失、非数值或无穷流量时停止。
+5. 有效流量少于 10 点、存在负流量或派生列名与输入列冲突时停止场次提取。
+6. 以相邻时间差的中位数表示候选步长：
+
+```text
+dt_seconds = median(diff(time))
+regularity = count(abs(diff(time) - dt_seconds) <= max(1 second, 0.01 * dt_seconds)) / count(diff(time))
+```
+
+规则度低于 `99%` 时 runtime 发出警告并按中位时间步继续固定步长计算。真实缺步、变频或大量不规则间隔应在调用前重采样或分段；不得把该 warning 当作数据已修复。
+
+### 场次算法
+
+除非用户明确选择其他事件定义，按以下顺序处理，不要交换“基流分割、洪峰识别、边界识别、复峰合并、主峰收紧、规模筛选”的先后关系：
+
+```text
+连续序列
+  -> 数据质量和时间规则检查
+  -> Eckhardt 基流分割
+  -> 在 quickflow 上识别候选洪峰
+  -> 在总流量上确定初始边界
+  -> 合并重叠事件和相邻复峰
+  -> 围绕主峰在 quickflow 上收紧边界
+  -> 按历时、洪峰和洪量筛选
+  -> 附加起涨前窗口
+  -> 指标、过程表、完整序列和诊断图
+```
+
+1. **Eckhardt 基流分割**
+
+   ```text
+   baseflow = Eckhardt(Q, alpha, BFImax)
+   quickflow = max(Q - baseflow, 0)
+   quickflow_ratio = quickflow / max(Q, epsilon)
+   ```
+
+   用户有率定值或文献值时优先采用并记录来源。没有 `alpha` 时，可从相邻正流量下降段的 `Q(t) / Q(t-1)` 估计：有效下降比值少于 20 个时可用 `0.95` 作为待检查起点，否则用其 90% 分位数，并限制在 `[0.80, 0.9999]`。`BFImax=0.80` 只能作为示例起点，必须结合含水层和基流特性判断。递推结果限制为 `0 <= baseflow <= Q`，并用总流量、基流和直接径流图检查水文合理性。
+
+2. **在直接径流上识别候选洪峰**
+
+   ```text
+   peak_height_threshold = quantile(positive_quickflow, peak_quantile)
+   prominence = prominence_factor * std(quickflow)
+   distance_steps = round(min_peak_distance_hours * 3600 / dt_seconds)
+   ```
+
+   峰高、prominence 和最小峰间距须同时满足。没有正直接径流时返回空事件集，不再构造边界。
+
+3. **在总流量上确定初始边界**
+
+   对峰前、峰后分别在 `max_search_days` 限定范围内计算局部最低流量 `baseline`：
+
+   ```text
+   boundary_threshold = baseline + boundary_fraction * (peak_flow - baseline)
+   ```
+
+   从峰值向两侧搜索，连续 `boundary_persistence_steps` 个点不高于阈值时形成边界候选；范围内无满足点时，使用该侧最低流量位置。左右基线分别计算。
+
+4. **合并重叠事件和相邻复峰**
+
+   重叠窗口直接合并。对于不重叠且间隔不超过 `merge_gap_hours` 的窗口，计算：
+
+   ```text
+   valley_ratio = valley_flow / min(peak_1, peak_2)
+   ```
+
+   当 `valley_ratio >= valley_ratio_threshold` 时视为退水不充分并合并；合并窗口取最早起点、最晚终点和窗口内最大总流量对应的主峰。
+
+5. **围绕主峰收紧边界**
+
+   合并后以主峰为中心，在 `quickflow` 上重新执行边界搜索。检查收紧后是否丢失用户希望保留的次峰、是否重新重叠，以及 `start <= peak <= end`。用户要求保留完整复峰过程时，应保留合并窗口或调整边界策略，不得机械缩成单峰。
+
+6. **按历时和规模筛选**
+
+   ```text
+   duration_hours = (end_idx - start_idx) * dt_seconds / 3600
+   total_volume = integral(Q dt)
+   quickflow_volume = integral(quickflow dt)
+   baseflow_volume = integral(baseflow dt)
+   ```
+
+   可按已确认的 `min_event_duration_hours`、`min_peak_flow`、`min_event_volume` 筛选；`None` 表示关闭相应门槛。必须写明洪量门槛比较总流量还是直接径流洪量。流量为 `m3/s` 时积分洪量为 `m3`；日均流量仍按实际秒数积分。
+
+7. **附加起涨前窗口**
+
+   ```text
+   warmup_steps = round(warmup_duration_hours * 3600 / dt_seconds)
+   export_start_idx = max(0, start_idx - warmup_steps)
+   ```
+
+   前期记录标记 `is_warmup=True`，`relative_step` 和 `hours_from_start` 为负，不参与洪峰、洪量和历时计算。优先向用户询问实际时长，再换算为步数；不要把 `72 steps` 直接称为 72 小时。只有真正用于模型状态恢复时才称为 warmup，并确认所需驱动变量、序列开头不足和相邻窗口重叠的处理方式。
+
+### 参数使用规则
+
+下列值来自附件中的算法示例，只可作为候选起点，不是跨流域通用标准：
+
+| 参数 | 示例起点 | 调大后的主要影响 |
+|---|---:|---|
+| `bfi_max` | `0.80` | 通常增加基流、减少 quickflow |
+| `alpha` | 自动估计 | 基流变化更平缓、退水记忆更强 |
+| `peak_quantile` | `0.90` | 提高峰高门槛，减少候选峰 |
+| `prominence_factor` | `0.25` | 排除更多不突出的峰 |
+| `min_peak_distance_hours` | `24 h` | 相近峰更难同时保留 |
+| `boundary_fraction` | `0.05` | 边界阈值升高，事件通常更短 |
+| `boundary_persistence_steps` | `3` | 边界更稳定，也可能更远 |
+| `max_search_days` | `20 d` | 允许更长事件 |
+| `merge_gap_hours` | `24 h` | 更多相邻峰进入合并判断 |
+| `valley_ratio_threshold` | `0.60` | 只有更浅谷值才合并，条件更严格 |
+| `min_event_duration_hours` | `1 h` | 剔除更多短事件 |
+| `min_peak_flow` | `300` | 剔除更多小洪峰；数值仅对原单位有意义 |
+| `min_event_volume` | `25,000,000` | 剔除更多小洪量事件；数值仅对原单位有意义 |
+| `warmup_steps` | `72 steps` | 仅扩展导出上下文，不改变事件指标 |
+
+有防洪标准、调度规程、历史场次或专家规则时优先采用并记录来源。没有业务标准时，先报告流量和正 quickflow 分布、prominence、峰间距、初步洪峰/洪量/历时分布，再比较少量宽松、中等、严格组合。一次只调整少量相关参数，保存每组参数、候选峰数、初始事件数、合并数、筛除数和最终场次数；不得仅凭最终事件数选择“最优”参数。
+
+### 场次成果
+
+至少生成三类互相可核对的数据产品：
+
+- **场次汇总表**：一行一场，至少包含 `event_id`、`warmup_start_time`、`start_time`、`peak_time`、`end_time`、`start_flow`、`peak_flow`、`end_flow`、`duration_hours`、`rise_time_hours`、`recession_time_hours`、`total_volume`、`quickflow_volume`、`baseflow_volume`、`quickflow_fraction`、`n_local_peaks`。`n_local_peaks` 只作复杂度提示，不直接解释为独立场次数。
+- **场次过程表**：保留用户要求的原始驱动列，并增加 `event_id`、`baseflow`、`quickflow`、`quickflow_ratio`、`is_warmup`、`relative_step`、`hours_from_start`。前期窗口可以在相邻事件中重复；下游需要唯一时间戳时另行确认去重规则。
+- **完整序列表**：保留清理后的连续序列、基流、直接径流和场次编号；事件外和仅属于前期窗口的记录不写 `event_id`。
+
+Runtime 主输出：
+
+```text
+dataset-output-dir/
+|-- dataset.json
+|-- dataset.parquet
+`-- result.json
+```
+
+`dataset.parquet` 按事件复制窗口并包含 `event_id`、`baseflow`、`quickflow`、`quickflow_ratio`、`is_warmup`、`relative_step` 和 `hours_from_start`。`dataset.json.events` 保存每场起点、峰值、终点、洪量和历时；`provenance.event_extraction` 保存完整配置、实际 `alpha`、时间规则度以及候选、合并、收紧、筛除和最终事件数量。
+
+runtime 不生成 Excel、逐场 CSV 或诊断图。用户需要这些成果时，Agent 可从标准 dataset 另行导出或调用固定 Visualization 能力，但不得改变事件识别结果。
+
+诊断图至少包括全序列总流量、基流和最终洪峰，以及代表性单场的总流量、基流、直接径流、起止点、主峰和前期窗口。绘图可以抽稀，识别和指标计算不得使用抽稀数据。
+
+### 提取质量门槛
+
+声明提取完成前必须验证：
+
+- 时间可解析且严格递增；重复、缺失、长缺口、异常值和不规则步长已按确认规则处理或标记。
+- `0 <= baseflow <= flow`、`quickflow >= 0`、`flow ≈ baseflow + quickflow`、`0 <= quickflow_ratio <= 1`。
+- 每场满足 `start_idx <= peak_idx <= end_idx`，历时为正，主峰是窗口内最大总流量，最终事件没有未解释重叠或跨越未处理长缺口。
+- 前期窗口不参与事件指标；总洪量近似等于直接径流洪量与基流洪量之和，所有洪量非负且单位正确，`quickflow_fraction` 位于 `[0, 1]`。
+- 汇总表、过程表、完整序列和逐场文件的 `event_id` 一致，最终场次数一致，计划输出均可读取且未发生文件覆盖。
+- 没有事件时依次检查列映射、quickflow、`BFImax/alpha`、峰高与 prominence、规模门槛和单位；不要只放宽单个阈值后直接接受结果。
+- 事件过多时检查噪声、峰值门槛、峰间距、规模门槛和合并规则；误拆或误并时检查峰间间隔、谷峰比、边界参数与主峰收紧；窗口或洪量异常时检查步长、积分方法、缺口、单位和事件完整性。
+
+只有输入映射与单位、事件定义、关键参数、前期窗口实际时长、数据质量处理、数值检查和标准 artifacts 都已记录并通过检查，才能声明场次提取完成。runtime 会直接写出 `series_mode=event_collection`，并把配置中的 `warmup_steps` 标为 `confirmed_from_event_config`；评分优先依据逐行 `is_warmup` 排除前期窗口，不同事件之间不得传递模型状态。
 
 ## DEM 与空间前处理
 

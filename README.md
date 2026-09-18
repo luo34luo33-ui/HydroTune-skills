@@ -38,6 +38,7 @@ HydroTune-Skills 为 AI Agent 提供从原始水文数据整理、建模前分�
 
 - 原始数据检查、字段角色确认、单位记录和标准化。
 - 连续序列与独立洪水场次管理。
+- 基于显式配置的 Eckhardt 基流分割、quickflow 洪峰识别和场次边界提取。
 - 数据质量、事件统计和建模准备度分析。
 - HBV、XAJ、Tank 前向模拟。
 - DE、PSO、GA、SCE 和两阶段参数优化。
@@ -94,6 +95,21 @@ python scripts/hydrotune.py intake data/raw.csv artifacts/basin-a \
 
 python scripts/hydrotune.py analyze artifacts/basin-a artifacts/analysis-a
 ```
+
+从连续序列提取事件集合时，必须提供包含全部已确认参数的 JSON：
+
+```bash
+python scripts/hydrotune.py intake data/raw.csv artifacts/flood-events \
+  --time-column Time \
+  --role precipitation=Rain \
+  --role discharge=Flow \
+  --unit precipitation=mm \
+  --unit discharge=m3/s \
+  --extract-events \
+  --event-config event-config.json
+```
+
+事件配置必须显式给出 Eckhardt、洪峰、边界、复峰合并、规模筛选和 warmup 参数，完整字段见 `skills/hydrotune-intake/SKILL.md`。runtime 不提供已移除的简单流量阈值切分模式。
 
 使用运行契约执行模型，并对模拟结果进行诊断：
 
@@ -154,7 +170,7 @@ HydroTune 不会把列名猜测、常见经验或 Agent 推荐自动当成用户
 - 洪水场次的 warmup 步数。
 - 模型参数、率定优化器和随机种子。
 - 上游来流及 Muskingum 参数。
-- 事件提取阈值和空间处理规则。
+- 事件提取配置和空间处理规则。
 
 对于 `event_collection`，每场洪水必须独立初始化模型状态，不得把不同场次拼接为连续序列。若数据包含上游来流，原生模型运行必须使用 Muskingum routing。
 
@@ -165,6 +181,8 @@ HydroTune-Skills/
 ├── SKILL.md                 # 总入口与全局工作流规则
 ├── skills/                  # 各阶段 Agent Skills
 ├── scripts/hydrotune/       # 确定性水文 runtime
+│   ├── intake.py            # dataset writer 与事件提取接线
+│   └── flood_events.py      # 基流、洪峰和场次边界算法
 ├── scripts/hydrotune.py     # CLI 入口
 ├── contracts/               # dataset、run、result JSON Schema
 ├── references/              # 数据质量与率定参考资料

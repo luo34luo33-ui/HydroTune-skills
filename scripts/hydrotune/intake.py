@@ -15,12 +15,12 @@ import pandas as pd
 
 from .common import DATASET_VERSION, finish, result, stamp, write_json
 from .data import parse_units, read_table, source_paths, timestep
+from .flood_events import FloodEventConfig, extract_flood_event_collection
 
 
 SUPPORTED_SERIES_MODES = ("continuous", "event_collection")
 SUPPORTED_ROLES = ("precipitation", "discharge", "upstream_discharge", "temperature", "pet")
 MODELING_INTENTS = ("rainfall_runoff", "artifact_only")
-EVENT_EXTRACTION_METHOD = "flow_threshold"
 CONTINUOUS_SPLIT_FRACTIONS = {"warmup": 0.10, "calibration": 0.70, "validation": 0.20}
 EVENT_SPLIT_FRACTIONS = {"calibration": 0.70, "validation": 0.30}
 
@@ -135,92 +135,6 @@ def _build_splits(frame: pd.DataFrame, series_mode: str, files: list[dict[str, A
     return _build_continuous_splits(frame) if series_mode == "continuous" else _build_event_splits(files)
 
 
-def _validate_event_options(
-    extract_events: bool,
-    series_mode: str | None,
-    threshold: float | None,
-    merge_gap_steps: int | None,
-) -> None:
-    if not extract_events:
-        return
-    if series_mode == "event_collection":
-        raise ValueError("--extract-events cannot be used with event_collection")
-    if threshold is None:
-        raise ValueError("--event-flow-threshold is required when --extract-events is used")
-    if merge_gap_steps is None:
-        raise ValueError("--event-merge-gap-steps is required when --extract-events is used")
-    if merge_gap_steps < 0:
-        raise ValueError("--event-merge-gap-steps must be greater than or equal to zero")
-
-
-def _extract_flow_threshold_events(
-    frame: pd.DataFrame,
-    discharge_column: str,
-    threshold: float,
-    merge_gap_steps: int,
-) -> tuple[pd.DataFrame, list[dict[str, Any]], list[dict[str, Any]]]:
-    flow = pd.to_numeric(frame[discharge_column], errors="coerce")
-    above = flow.gt(threshold).to_list()
-    ranges: list[tuple[int, int]] = []
-    start = None
-    last_above = None
-    gap = 0
-
-    for index, is_above in enumerate(above):
-        if start is None:
-            if is_above:
-                start = index
-                last_above = index
-                gap = 0
-            continue
-        if is_above:
-            last_above = index
-            gap = 0
-            continue
-        gap += 1
-        if gap > merge_gap_steps:
-            ranges.append((start, last_above))
-            start = None
-            last_above = None
-            gap = 0
-    if start is not None:
-        ranges.append((start, last_above))
-    if not ranges:
-        raise ValueError("no flood events exceeded --event-flow-threshold")
-
-    event_frames = []
-    event_files = []
-    event_records = []
-    for sequence, (start_index, end_index) in enumerate(ranges, start=1):
-        event = frame.iloc[start_index : end_index + 1].copy()
-        event_id = f"flood-{event.timestamp.iloc[0].strftime('%Y%m%dT%H%M%S')}-{sequence:03d}"
-        event["event_id"] = event_id
-        event_frames.append(event)
-        event_files.append(
-            {
-                "path": str(event.source_file.iloc[0]),
-                "event_id": event_id,
-                "rows": int(len(event)),
-                "time_start": event.timestamp.iloc[0].isoformat(),
-                "time_end": event.timestamp.iloc[-1].isoformat(),
-                "timestep": timestep(event.timestamp),
-            }
-        )
-        flow_values = pd.to_numeric(event[discharge_column], errors="coerce")
-        peak_index = flow_values.idxmax() if flow_values.notna().any() else None
-        event_records.append(
-            {
-                "event_id": event_id,
-                "start": event.timestamp.iloc[0].isoformat(),
-                "end": event.timestamp.iloc[-1].isoformat(),
-                "samples": int(len(event)),
-                "peak_discharge": float(flow_values.max()) if flow_values.notna().any() else None,
-                "peak_time": event.loc[peak_index, "timestamp"].isoformat() if peak_index is not None else None,
-            }
-        )
-    return pd.concat(event_frames, ignore_index=True), event_records, event_files
-
-
 def _variables(frame: pd.DataFrame, roles: dict[str, str], units: dict[str, str]) -> tuple[list[dict[str, Any]], list[str]]:
     variables = []
     errors = []
@@ -306,8 +220,7 @@ def intake_dataset(
     basin_id: str | None = None,
     basin_area_km2: float | None = None,
     extract_events: bool = False,
-    event_flow_threshold: float | None = None,
-    event_merge_gap_steps: int | None = None,
+    event_config: Path | None = None,
     modeling_intent: str = "rainfall_runoff",
 ) -> int:
     output.mkdir(parents=True, exist_ok=True)
@@ -317,7 +230,18 @@ def intake_dataset(
         return finish(output, result("intake", errors=[f"unsupported modeling_intent: {modeling_intent}"]))
 
     try:
-        _validate_event_options(extract_events, series_mode, event_flow_threshold, event_merge_gap_steps)
+        if extract_events and series_mode == "event_collection":
+            raise ValueError("--extract-events cannot be used with --series-mode event_collection")
+        if extract_events and event_config is None:
+            raise ValueError("--event-config is required when --extract-events is used")
+        if not extract_events and event_config is not None:
+            raise ValueError("--event-config requires --extract-events")
+        flood_config = None
+        if event_config is not None:
+            flood_config = FloodEventConfig.from_mapping(
+                json.loads(event_config.read_text(encoding="utf-8"))
+            )
+
         input_mode = series_mode or "continuous"
         frame, files = _load_source(source, time_column, series_mode)
         variables, errors = _variables(frame, roles, units)
@@ -329,36 +253,40 @@ def intake_dataset(
                 basin["area_km2"] = basin_area_km2
 
         output_mode = input_mode
-        events = None
-        manifest_files = files
         event_extraction = None
+        events = None
+        extraction_warnings = []
         if extract_events:
             discharge_column = roles.get("discharge")
-            event_extraction = {
-                "method": EVENT_EXTRACTION_METHOD,
-                "flow_threshold": event_flow_threshold,
-                "merge_gap_steps": event_merge_gap_steps,
-                "discharge_column": discharge_column,
-                "source_series_mode": "continuous",
-            }
             if discharge_column is None:
                 errors.append("event extraction requires a discharge role mapping")
-                events = []
-                manifest_files = []
-            else:
-                frame, events, manifest_files = _extract_flow_threshold_events(
-                    frame,
-                    discharge_column,
-                    float(event_flow_threshold),
-                    int(event_merge_gap_steps),
+            if not errors:
+                extraction = extract_flood_event_collection(
+                    frame=frame,
+                    discharge_column=discharge_column,
+                    source=source,
+                    config=flood_config,
                 )
+                frame = extraction.frame
+                files = extraction.files
+                events = extraction.events
+                event_extraction = extraction.metadata
+                extraction_warnings = extraction.warnings
                 output_mode = "event_collection"
 
-        timestep_value = timestep(frame.timestamp)
+        timestep_value = (
+            pd.Timedelta(seconds=event_extraction["timestep_seconds"]).isoformat()
+            if event_extraction is not None
+            else timestep(frame.timestamp)
+        )
         data_state = _data_state(frame, variables)
-        splits = _build_splits(frame, output_mode, manifest_files)
+        splits = _build_splits(frame, output_mode, files)
+        if event_extraction is not None:
+            splits["warmup_steps"] = flood_config.warmup_steps
+            splits["warmup_status"] = "confirmed_from_event_config"
+            splits["warmup_filter"] = "is_warmup_column"
         readiness = _modeling_readiness(variables, basin, output_mode, splits, timestep_value)
-        warnings = list(readiness["warnings"])
+        warnings = extraction_warnings + list(readiness["warnings"])
         if readiness["modeling_status"] == "not_ready":
             warnings.extend(readiness["blocking"])
 
@@ -373,7 +301,7 @@ def intake_dataset(
             "source_time_column": time_column,
             "timestep": timestep_value,
             "series_mode": output_mode,
-            "files": manifest_files,
+            "files": files,
             "splits": splits,
             "variables": variables,
             "basin": basin,
@@ -392,9 +320,7 @@ def intake_dataset(
         }
         if event_extraction is not None:
             manifest["provenance"]["event_extraction"] = event_extraction
-        if events is not None:
             manifest["events"] = events
-
         outputs = _write_dataset_artifacts(output, frame, manifest, errors)
         return finish(
             output,
@@ -432,6 +358,8 @@ def select_scoring_frame(frame: pd.DataFrame, meta: dict[str, Any], purpose: str
     warmup = meta["splits"].get("warmup_steps")
     if warmup is None:
         raise ValueError("event_collection requires confirmed warmup_steps before scoring")
+    if "is_warmup" in selected.columns:
+        return selected[~selected.is_warmup.fillna(False).astype(bool)]
     return selected[selected.groupby("event_id").cumcount() >= int(warmup)]
 
 
@@ -458,7 +386,6 @@ def cmd_intake(args) -> int:
         basin_id=args.basin_id,
         basin_area_km2=args.basin_area_km2,
         extract_events=args.extract_events,
-        event_flow_threshold=args.event_flow_threshold,
-        event_merge_gap_steps=args.event_merge_gap_steps,
+        event_config=Path(args.event_config) if args.event_config else None,
         modeling_intent=args.modeling_intent,
     )

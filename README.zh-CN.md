@@ -16,7 +16,7 @@ Agent checks and confirms raw inputs
 ## 当前完成度
 
 - 已保留核心 runtime：Analysis、HBV/Tank/XAJ 原生建模、Muskingum routing、Calibration、Comparison/BMA、Diagnosis、Reporting、Visualization。
-- Intake 已瘦身：不再提供正式 `inspect` 契约，不再自动推断列角色，不再处理 Geo。它只把 Agent 已确认的信息写成 `dataset.json`、`dataset.parquet`、`result.json`。
+- Intake 不再自动推断列角色或处理 Geo；除标准 dataset artifacts 外，它可在显式事件配置下执行 Eckhardt 基流分割、quickflow 洪峰识别和场次边界提取。
 - Geo 处理已移出核心 runtime：DEM 水文处理、子流域划分、河段拓扑、HRU 生成和子流域雨量站面积权重应由 Agent 使用合适工具或外部 GIS 成果完成。Analysis/Visualization 仍可读取现成 `geo.json` 和 GeoJSON artifacts。
 - 三个原生模型统一返回本流域径流深 `mm/step`；运行层负责时间步传递、面积换算、分场次状态重置和上游 Muskingum 路由。
 - 已冻结核心 contracts：`dataset.parquet + dataset.json`、`run.json`、`result.json`。
@@ -85,7 +85,7 @@ python scripts/hydrotune.py intake data/events artifacts/events `
 
 三个模型会按 `event_id` 逐场重新初始化，禁止把不同洪水场次拼接成连续状态。前向模拟保留所有时段，warmup 行只在率定和验证评分时排除。
 
-从连续序列提取洪水场次时，阈值和短间断步数必须来自用户确认：
+从连续序列提取场次时，先把全部已确认参数写入 JSON，再调用固定水文方法：
 
 ```powershell
 python scripts/hydrotune.py intake data/raw.csv artifacts/flood-events `
@@ -93,11 +93,12 @@ python scripts/hydrotune.py intake data/raw.csv artifacts/flood-events `
   --role precipitation=Rain `
   --role discharge=Flow `
   --unit precipitation=mm `
-  --unit discharge=mm `
+  --unit discharge=m3/s `
   --extract-events `
-  --event-flow-threshold 3 `
-  --event-merge-gap-steps 1
+  --event-config event-config.json
 ```
+
+`event-config.json` 必须包含 `bfi_max`、`alpha`、`peak_quantile`、`prominence_factor`、`min_peak_distance_hours`、`boundary_fraction`、`boundary_persistence_steps`、`max_search_days`、`merge_gap_hours`、`valley_ratio_threshold`、`min_event_duration_hours`、`min_peak_flow`、`min_event_volume` 和 `warmup_steps`。`alpha` 可为 `null` 以启用退水段估计；两个规模门槛可为 `null`。完整字段含义和确认规则见 `skills/hydrotune-intake/SKILL.md`。
 
 ## 三个原生集总式模型
 
@@ -175,7 +176,8 @@ HydroTune-Skills/
 ├─ skills/                         # Agent 指令层：判断、追问、调用顺序
 ├─ scripts/hydrotune.py            # CLI 入口
 ├─ scripts/hydrotune/              # 核心水文 runtime
-│  ├─ intake.py                    # 薄 dataset artifact writer
+│  ├─ intake.py                    # dataset writer 与事件提取接线
+│  ├─ flood_events.py              # 基流、洪峰和场次边界算法
 │  ├─ analysis.py                  # 建模前 evidence
 │  ├─ modeling.py                  # 模型调度、单位换算、routing
 │  ├─ calibration.py               # 参数率定
@@ -192,6 +194,7 @@ HydroTune-Skills/
 - 未确认的单位、流量语义、series mode、event warmup、模型参数和 routing 参数必须先问。
 - `event_collection` 必须保持事件独立，不得拼成连续序列。
 - `event_collection` 的 `warmup_steps` 必须确认；不同场次之间不得传递土壤含水、积雪、水箱蓄水或河道状态。
+- 连续序列事件提取必须使用完整、已确认的事件配置；不提供简单流量阈值切分模式。
 - `upstream_discharge` 存在时，native model 必须使用 Muskingum routing；率定会把 `routing.K` 和 `routing.X` 纳入搜索空间。
 - 模型本体只返回本流域 `mm/step`；真实面积换算和上游流量叠加只能在共享运行层执行一次。
 - 子流域雨量站权重必须基于有效像元面积统计，并通过逐子流域权重和检查。
