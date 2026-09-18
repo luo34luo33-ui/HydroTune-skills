@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HydroTune result v1",
+  "type": "object",
+  "required": ["schema_version", "artifact_type", "status", "errors", "warnings", "output_artifacts"],
+  "properties": {
+    "schema_version": {"const": "hydrotune.result.v1"},
+    "status": {"enum": ["success", "warning", "error"]},
+    "errors": {"type": "array"},
+    "warnings": {"type": "array"},
+    "output_artifacts": {"type": "array"}
+  }
+}

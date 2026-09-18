@@ -1,0 +1,185 @@
+{
+  "version": "intake-v0.1",
+  "cases": [
+    {
+      "id": "01_clear_rain_flow",
+      "input": "cases/01_clear_rain_flow.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "02_gauge_blanks",
+      "input": "cases/02_gauge_blanks.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone",
+        "rain_missingness"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "03_short_names",
+      "input": "cases/03_short_names.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "04_no_timestamp",
+      "input": "cases/04_no_timestamp.csv",
+      "expected_required_question_ids": [
+        "units"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "05_bad_timestamp",
+      "input": "cases/05_bad_timestamp.csv",
+      "expected_required_question_ids": [
+        "units"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "06_temperature_only",
+      "input": "cases/06_temperature_only.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "07_rain_only",
+      "input": "cases/07_rain_only.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "08_flow_only",
+      "input": "cases/08_flow_only.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "09_irregular_time",
+      "input": "cases/09_irregular_time.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "10_duplicate_time",
+      "input": "cases/10_duplicate_time.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "11_unknown_columns",
+      "input": "cases/11_unknown_columns.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "12_pet_and_temp",
+      "input": "cases/12_pet_and_temp.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "13_rainfall_word",
+      "input": "cases/13_rainfall_word.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "14_streamflow_word",
+      "input": "cases/14_streamflow_word.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "15_operational_flows",
+      "input": "cases/15_operational_flows.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "16_mixed_case",
+      "input": "cases/16_mixed_case.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone",
+        "rain_missingness"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "17_numeric_date",
+      "input": "cases/17_numeric_date.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "18_partial_bad_dates",
+      "input": "cases/18_partial_bad_dates.csv",
+      "expected_required_question_ids": [
+        "units"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "19_multi_gauge",
+      "input": "cases/19_multi_gauge.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone",
+        "rain_missingness"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    },
+    {
+      "id": "20_model_ready_shape",
+      "input": "cases/20_model_ready_shape.csv",
+      "expected_required_question_ids": [
+        "units",
+        "timezone"
+      ],
+      "agent_task": "Prepare this file for rainfall-runoff analysis using HydroTune. Inspect it first and ask only necessary scientific questions before normalizing it."
+    }
+  ]
+}

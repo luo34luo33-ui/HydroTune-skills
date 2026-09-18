@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HydroTune model run v1",
+  "type": "object",
+  "required": ["schema_version", "model", "input_dataset", "parameters"],
+  "properties": {
+    "schema_version": {"const": "hydrotune.run.v1"},
+    "model": {"type": "object", "required": ["kind", "name"]},
+    "input_dataset": {"type": "string"},
+    "parameters": {"type": "object"},
+    "routing": {"type": "object", "properties": {"method": {"const": "muskingum"}, "K": {"type": "number", "exclusiveMinimum": 0}, "X": {"type": "number", "minimum": 0, "maximum": 0.5}, "dt_hours": {"type": "number", "exclusiveMinimum": 0}, "reaches": {"type": "integer", "minimum": 1}}}
+  }
+}

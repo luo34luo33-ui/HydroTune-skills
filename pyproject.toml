@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hydrotune-scripts"
+version = "0.1.0"
+description = "Deterministic hydrology computations for HydroTune skills"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "pandas>=2.0", "pyarrow>=14", "matplotlib>=3.8", "scipy>=1.10"]
+
+[project.optional-dependencies]
+geo = ["geopandas>=0.14", "shapely>=2.0", "pyproj>=3.6", "fiona>=1.9"]
+
+[project.scripts]
+hydrotune = "hydrotune.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "scripts"}
+
+[tool.setuptools.packages.find]
+where = ["scripts"]

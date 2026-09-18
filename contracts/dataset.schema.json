@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HydroTune dataset manifest v1",
+  "type": "object",
+  "required": ["schema_version", "artifact_type", "status", "data_file", "time_column", "variables", "provenance"],
+  "properties": {
+    "schema_version": {"const": "hydrotune.dataset.v1"},
+    "artifact_type": {"const": "dataset"},
+    "status": {"enum": ["success", "warning", "error"]},
+    "data_file": {"type": "string"},
+    "time_column": {"type": "string"},
+    "variables": {"type": "array"},
+    "provenance": {"type": "object"}
+  }
+}
