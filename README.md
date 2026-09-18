@@ -167,10 +167,8 @@ HydroTune-Skills/
 ├── scripts/hydrotune/       # 确定性水文 runtime
 ├── scripts/hydrotune.py     # CLI 入口
 ├── contracts/               # dataset、run、result JSON Schema
-├── models/                  # 模型补充文档
 ├── references/              # 数据质量与率定参考资料
-├── tests/                   # 单元测试与端到端测试
-└── benchmarks/              # Intake 基准样例
+└── tests/                   # 单元测试与端到端测试
 ```
 
 ## 测试

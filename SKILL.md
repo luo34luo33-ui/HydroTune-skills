@@ -27,7 +27,6 @@ HydroTune-Skills/
   skills/
   contracts/
   scripts/
-  models/
   references/
   pyproject.toml
 ```

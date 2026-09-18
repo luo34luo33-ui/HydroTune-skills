@@ -183,8 +183,7 @@ HydroTune-Skills/
 │  ├─ diagnosis.py                 # observed-simulated 指标与证据
 │  └─ models/                      # HBV、XAJ、Tank 与共享 forcing/time-step 工具
 ├─ contracts/                       # JSON Schema
-├─ tests/                           # e2e 测试
-└─ benchmarks/                      # 历史 intake benchmark，需按新边界继续更新
+└─ tests/                           # e2e 测试
 ```
 
 ## 核心约束
